@@ -28,7 +28,7 @@ proc dependencies {fileName firstLine {force 1} {command {}}} {
       }
     }
   }
-  
+
   if {[llength $list] > 0} {
     puts -nonewline $firstLine
     foreach file $list {puts -nonewline $suffix$file}
@@ -46,77 +46,71 @@ proc dependencies {fileName firstLine {force 1} {command {}}} {
     puts {}
   }
 
-  close $fid  
+  close $fid
 }
 
-proc dictDeps {dictVar args} {
+proc dictDeps {dictPrefix args} {
 
   global prefix suffix srcSuf objSuf pcmSuf
 
-  set dict [eval glob -nocomplain $args]
-  
+  set dict [lsort [eval glob -nocomplain $args]]
+
   set dictSrcFiles {}
   set dictObjFiles {}
 
   foreach fileName $dict {
     regsub {LinkDef\.h} $fileName {Dict} dictName
     set dictName $prefix$dictName
-  
+
     lappend dictSrcFiles $dictName$srcSuf
     lappend dictObjFiles $dictName$objSuf
     lappend dictPcmFiles [file tail $dictName$pcmSuf]
-  
+
     dependencies $fileName "$dictName$srcSuf:$suffix$fileName"
 
+    puts -nonewline $dictName$pcmSuf:$suffix
+    puts $dictName$srcSuf
+
     puts -nonewline [file tail $dictName$pcmSuf]:$suffix
-    puts -nonewline $dictName$pcmSuf$suffix
-    puts -nonewline $dictName$srcSuf
-    puts {}
+    puts $dictName$pcmSuf
   }
-  
-  puts -nonewline "${dictVar} += $suffix"
-  puts [join $dictSrcFiles $suffix]
-  puts {}
 
-  puts -nonewline "${dictVar}_OBJ += $suffix"
+  puts -nonewline "${dictPrefix}_OBJ += $suffix"
   puts [join $dictObjFiles $suffix]
-  puts {}
 
-  puts -nonewline "${dictVar}_PCM += $suffix"
+  puts -nonewline "${dictPrefix}_PCM += $suffix"
   puts [join $dictPcmFiles $suffix]
-  puts {}
 }
 
 proc sourceDeps {srcPrefix args} {
 
   global prefix suffix srcSuf objSuf
-  
-  set source [eval glob -nocomplain $args]
-    
+
+  set source [lsort [eval glob -nocomplain $args]]
+
   set srcObjFiles {}
-  
+
   foreach fileName $source {
     regsub {\.cc} $fileName {} srcName
     set srcObjName $prefix$srcName
-  
+
     lappend srcObjFiles $srcObjName$objSuf
-  
+
     dependencies $fileName "$srcObjName$objSuf:$suffix$srcName$srcSuf"
   }
 
-  puts -nonewline "${srcPrefix}_OBJ = $suffix"
+  puts -nonewline "${srcPrefix}_OBJ += $suffix"
   puts [join $srcObjFiles $suffix]
-  puts {}
 }
 
-proc executableDeps {} {
+proc executableDeps {args} {
 
   global prefix suffix objSuf exeSuf
-   
-  set executable [glob -nocomplain {test/*.cpp}]
-  
+
+  set executable [lsort [eval glob -nocomplain $args]]
+
   set exeFiles {}
-  
+
   foreach fileName $executable {
     regsub {\.cpp} $fileName {} exeObjName
     set exeObjName $prefix$exeObjName
@@ -124,30 +118,26 @@ proc executableDeps {} {
 
     lappend exeFiles $exeName$exeSuf
     lappend exeObjFiles $exeObjName$objSuf
-    
+
     puts "$exeName$exeSuf:$suffix$exeObjName$objSuf"
-    puts {}
-  
+
     dependencies $fileName "$exeObjName$objSuf:$suffix$fileName"
   }
-  
+
   if [info exists exeFiles] {
-    puts -nonewline "EXECUTABLE = $suffix"
+    puts -nonewline "EXECUTABLE += $suffix"
     puts [join $exeFiles $suffix]
-    puts {}
   }
   if [info exists exeObjFiles] {
-    puts -nonewline "EXECUTABLE_OBJ = $suffix"
+    puts -nonewline "EXECUTABLE_OBJ += $suffix"
     puts [join $exeObjFiles $suffix]
-    puts {}
   }
-
 }
 
 proc headerDeps {} {
   global suffix headerFiles
-    
-  foreach fileName [array names headerFiles] {  
+
+  foreach fileName [array names headerFiles] {
     dependencies $fileName "$fileName:" 0 "\t@touch \$@"
   }
 }
@@ -158,7 +148,7 @@ puts {
 #
 # Author: P. Demin - UCL, Louvain-la-Neuve
 #
-# multi-platform configuration is taken from ROOT (root/test/Makefile)
+# multi-platform configuration is taken from ROOT (root/test/Makefile.arch)
 #
 
 include doc/Makefile.arch
@@ -168,29 +158,26 @@ ROOT_MAJOR := $(shell $(RC) --version | cut -d'.' -f1)
 SrcSuf = cc
 PcmSuf = _rdict.pcm
 
-CXXFLAGS += $(ROOTCFLAGS) -DDROP_CGAL -I.
-LIBS = $(ROOTLIBS) $(SYSLIBS)
-GLIBS = $(ROOTGLIBS) $(SYSLIBS)
-	
+CXXFLAGS += $(ROOTCFLAGS) -Wno-write-strings -D_FILE_OFFSET_BITS=64 -DDROP_CGAL -I.
+LIBS = $(ROOTLIBS)
+
 ###
 
 SHARED = libExRootAnalysis.$(DllSuf)
 SHAREDLIB = libExRootAnalysis.lib
 
 all:
-
 }
 
-executableDeps
+executableDeps {test/*.cpp}
 
-dictDeps {DICT} {src/*LinkDef.h} {modules/*LinkDef.h}
+dictDeps {DICT} {src/*LinkDef.h}
 
-sourceDeps {SOURCE} {src/*.cc} {modules/*.cc}
+sourceDeps {SHARED} {src/*.cc}
 
 headerDeps
 
 puts {
-
 ###
 
 ifeq ($(ROOT_MAJOR),6)
@@ -199,20 +186,11 @@ else
 all: $(SHARED) $(EXECUTABLE)
 endif
 
-$(SHARED): $(DICT_OBJ) $(SOURCE_OBJ)
+$(SHARED): $(DICT_OBJ) $(SHARED_OBJ)
 	@mkdir -p $(@D)
 	@echo ">> Building $@"
-ifeq ($(ARCH),aix5)
-	@$(MAKESHARED) $(OutPutOpt) $@ $(LIBS) -p 0 $^
-else
 ifeq ($(PLATFORM),macosx)
-# We need to make both the .dylib and the .so
 	@$(LD) $(SOFLAGS)$@ $(LDFLAGS) $^ $(OutPutOpt) $@ $(LIBS)
-ifneq ($(subst $(MACOSX_MINOR),,1234),1234)
-ifeq ($(MACOSX_MINOR),4)
-	@ln -sf $@ $(subst .$(DllSuf),.so,$@)
-endif
-endif
 else
 ifeq ($(PLATFORM),win32)
 	@bindexplib $* $^ > $*.def
@@ -221,13 +199,11 @@ ifeq ($(PLATFORM),win32)
 	@$(MT_DLL)
 else
 	@$(LD) $(SOFLAGS) $(LDFLAGS) $^ $(OutPutOpt) $@ $(LIBS)
-	@$(MT_DLL)
-endif
 endif
 endif
 
 clean:
-	@rm -f $(DICT_OBJ) $(SOURCE_OBJ) core
+	@rm -f $(DICT_OBJ) $(SHARED_OBJ) core
 	@rm -rf tmp
 
 distclean: clean
@@ -240,18 +216,16 @@ distclean: clean
 %Dict.$(SrcSuf):
 	@mkdir -p $(@D)
 	@echo ">> Generating $@"
-	@rootcint -f $@ -c $<
-	@echo "#define private public" > $@.arch
-	@echo "#define protected public" >> $@.arch
+	@rootcint -f $@ -c -Iexternal $<
 	@mv $@ $@.base
-	@cat $@.arch $< $@.base > $@
-	@rm $@.arch $@.base
+	@cat $< $@.base > $@
+	@rm $@.base
 
-%Dict$(PcmSuf):
+$(DICT_PCM): %Dict$(PcmSuf):
 	@echo ">> Copying $@"
 	@cp $< $@
 
-$(SOURCE_OBJ): tmp/%.$(ObjSuf): %.$(SrcSuf)
+$(SHARED_OBJ): tmp/%.$(ObjSuf): %.$(SrcSuf)
 	@mkdir -p $(@D)
 	@echo ">> Compiling $<"
 	@$(CXX) $(CXXFLAGS) -c $< $(OutPutOpt)$@
@@ -266,7 +240,7 @@ $(EXECUTABLE_OBJ): tmp/%.$(ObjSuf): %.cpp
 	@echo ">> Compiling $<"
 	@$(CXX) $(CXXFLAGS) -c $< $(OutPutOpt)$@
 
-$(EXECUTABLE): %$(ExeSuf): $(DICT_OBJ) $(SOURCE_OBJ)
+$(EXECUTABLE): %$(ExeSuf): $(DICT_OBJ) $(SHARED_OBJ)
 	@echo ">> Building $@"
 	@$(LD) $(LDFLAGS) $^ $(LIBS) $(OutPutOpt)$@
 
