@@ -34,14 +34,14 @@ proc dependencies {fileName firstLine {force 1} {command {}}} {
     foreach file $list {puts -nonewline $suffix$file}
     if {$command != {}} {
       puts {}
-      puts $command
+      puts -nonewline $command
     }
     puts {}
   } elseif {$force} {
     puts -nonewline $firstLine
     if {$command != {}} {
       puts {}
-      puts $command
+      puts -nonewline $command
     }
     puts {}
   }
